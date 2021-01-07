@@ -15,16 +15,24 @@ class ImageProjection {
 
   void cloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg);
 
+  // void cloudHandler(const pcl::PointCloud<PointTypeNew>::Ptr rgbd_cloud);
+
+  void cloudHandler(const sensor_msgs::PointCloud2 &cloud);
+
  private:
   void findStartEndAngle();
   void resetParameters();
   void projectPointCloud();
   void groundRemoval();
+  void generalRangeMat(const int &row, const int &col);
   void cloudSegmentation();
   void labelComponents(int row, int col);
   void publishClouds();
 
   pcl::PointCloud<PointType>::Ptr _laser_cloud_in;
+
+  // pcl::PointCloud<PointTypeNew>::Ptr _rgbd_cloud_in;
+  pcl::PointCloud<PointType>::Ptr _rgbd_cloud_in;
 
   pcl::PointCloud<PointType>::Ptr _full_cloud;
   pcl::PointCloud<PointType>::Ptr _full_info_cloud;
@@ -47,6 +55,11 @@ class ImageProjection {
   int _segment_valid_line_num;
   int _ground_scan_index;
   float _sensor_mount_angle;
+
+  int _num_vertical_pixel;
+  int _num_horizontal_pixel;
+  float _horizontal_fov;
+  float _vertical_fov;
 
   Channel<ProjectionOut>& _output_channel;
 

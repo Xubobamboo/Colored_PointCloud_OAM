@@ -68,13 +68,21 @@ ImageProjection::ImageProjection(ros::NodeHandle& nh,
   // 最上面一条线的角度,15度
   nh.getParam("/lego_loam/laser/vertical_angle_top", vertical_angle_top);
 
-  // x角度的分辨率,用π*2/水平线的个数,就是每个点之间间隔的角度
-  _ang_resolution_X = (M_PI*2) / (_horizontal_scans);
-  // 垂直每条线之间的分别率15 - (-15) / 15 * 每一度等于多少rad值
-  _ang_resolution_Y = DEG_TO_RAD*(vertical_angle_top - _ang_bottom) / float(_vertical_scans-1);
+
+  nh.getParam("/lego_loam/camera/num_vertical_pixel", _num_vertical_pixel);
+  nh.getParam("/lego_loam/camera/num_horizontal_pixel", _num_horizontal_pixel);
+  nh.getParam("/lego_loam/camera/horizontal_fov", _horizontal_fov);
+  nh.getParam("/lego_loam/camera/vertical_fov", _vertical_fov);
+
+
+
+  // 水平像素点之间的间隔角度
+  _ang_resolution_X = (_horizontal_fov) / (_num_horizontal_pixel - 1);
+  // 垂直方向每个像素点的间隔rad值
+  _ang_resolution_Y = DEG_TO_RAD*(_vertical_fov) / float(_num_vertical_pixel-1);
 
   // 计算最下面那条线的rad值
-  _ang_bottom = -( _ang_bottom - 0.1) * DEG_TO_RAD;
+  _ang_bottom = -(_vertical_fov / 2) * DEG_TO_RAD;
   // x,y的分割因子
   _segment_alpha_X = _ang_resolution_X;
   _segment_alpha_Y = _ang_resolution_Y;
@@ -99,9 +107,10 @@ ImageProjection::ImageProjection(ros::NodeHandle& nh,
   _sensor_mount_angle *= DEG_TO_RAD;
 
   // 所有点的总数
-  const size_t cloud_size = _vertical_scans * _horizontal_scans;
+  const size_t cloud_size = _num_vertical_pixel * _num_horizontal_pixel;
 
   // 输入的点云
+  _rgbd_cloud_in.reset(new pcl::PointCloud<PointType>());
   _laser_cloud_in.reset(new pcl::PointCloud<PointType>());
   _full_cloud.reset(new pcl::PointCloud<PointType>());
   _full_info_cloud.reset(new pcl::PointCloud<PointType>());
@@ -118,7 +127,7 @@ ImageProjection::ImageProjection(ros::NodeHandle& nh,
 }
 
 void ImageProjection::resetParameters() {
-  const size_t cloud_size = _vertical_scans * _horizontal_scans;
+  const size_t cloud_size = _num_vertical_pixel * _num_horizontal_pixel;
   PointType nanPoint;
   nanPoint.x = std::numeric_limits<float>::quiet_NaN();
   nanPoint.y = std::numeric_limits<float>::quiet_NaN();
@@ -130,9 +139,9 @@ void ImageProjection::resetParameters() {
   _segmented_cloud_pure->clear();
   _outlier_cloud->clear();
 
-  _range_mat.resize(_vertical_scans, _horizontal_scans);
-  _ground_mat.resize(_vertical_scans, _horizontal_scans);
-  _label_mat.resize(_vertical_scans, _horizontal_scans);
+  _range_mat.resize(_num_vertical_pixel, _num_horizontal_pixel);
+  _ground_mat.resize(_num_vertical_pixel, _num_horizontal_pixel);
+  _label_mat.resize(_num_vertical_pixel, _num_horizontal_pixel);
 
   _range_mat.fill(FLT_MAX);
   _ground_mat.setZero();
@@ -144,8 +153,8 @@ void ImageProjection::resetParameters() {
   std::fill(_full_info_cloud->points.begin(), _full_info_cloud->points.end(),
             nanPoint);
 
-  _seg_msg.startRingIndex.assign(_vertical_scans, 0);
-  _seg_msg.endRingIndex.assign(_vertical_scans, 0);
+  _seg_msg.startRingIndex.assign(_num_vertical_pixel, 0);
+  _seg_msg.endRingIndex.assign(_num_vertical_pixel, 0);
 
   _seg_msg.segmentedCloudGroundFlag.assign(cloud_size, false);
   _seg_msg.segmentedCloudColInd.assign(cloud_size, 0);
@@ -174,7 +183,59 @@ void ImageProjection::cloudHandler(
   publishClouds();
 }
 
+// void ImageProjection::cloudHandler(
+//     const pcl::PointCloud<PointTypeNew>::Ptr rgbd_cloud) {
+//   // Reset parameters
+//   resetParameters();
 
+//   // Copy and remove NAN points
+//   pcl::copyPointCloud(*rgbd_cloud, *_rgbd_cloud_in);
+//   std::vector<int> indices;
+//   pcl::removeNaNFromPointCloud(*_rgbd_cloud_in, *_rgbd_cloud_in, indices);
+//   // _seg_msg.header = laserCloudMsg->header;
+
+//   // findStartEndAngle();
+//   // Range image projection
+//   // projectPointCloud();
+//   // Mark ground points
+//   groundRemoval();
+//   // Point cloud segmentation
+//   cloudSegmentation();
+//   //publish (optionally)
+//   publishClouds();
+// }
+
+void ImageProjection::cloudHandler(
+    const sensor_msgs::PointCloud2 &cloud) {
+  // Reset parameters
+  resetParameters();
+
+  // Copy and remove NAN points
+  pcl::fromROSMsg(cloud, *_rgbd_cloud_in);
+  // pcl::copyPointCloud(*cloud, *_rgbd_cloud_in);
+  std::vector<int> indices;
+  pcl::removeNaNFromPointCloud(*_rgbd_cloud_in, *_rgbd_cloud_in, indices);
+  _seg_msg.header = cloud.header;
+
+// sensor_msgs::PointCloud2 laserCloudTemp;
+// pcl::toROSMsg(*_rgbd_cloud_in, laserCloudTemp);
+
+//   laserCloudTemp.header.stamp = cloud.header.stamp;
+//   laserCloudTemp.header.frame_id = "camera_init";
+//   _pub_full_cloud.publish(laserCloudTemp);
+
+  // findStartEndAngle();
+  // Range image projection
+  // projectPointCloud();
+  // Mark ground points
+  groundRemoval();
+  // Point cloud segmentation
+  cloudSegmentation();
+  //publish (optionally)
+  publishClouds();
+}
+
+// 不用
 void ImageProjection::projectPointCloud() {
   // range image projection
   const size_t cloudSize = _laser_cloud_in->points.size();
@@ -223,6 +284,7 @@ void ImageProjection::projectPointCloud() {
   }
 }
 
+// 不用
 void ImageProjection::findStartEndAngle() {
   // start and end orientation of this cloud
   auto point = _laser_cloud_in->points.front();
@@ -240,35 +302,36 @@ void ImageProjection::findStartEndAngle() {
       _seg_msg.endOrientation - _seg_msg.startOrientation;
 }
 
+// 修改完成
 void ImageProjection::groundRemoval() {
   // _ground_mat
   // -1, no valid info to check if ground of not
   //  0, initial value, after validation, means not ground
   //  1, ground
-  for (size_t j = 0; j < _horizontal_scans; ++j) {
-    for (size_t i = 0; i < _ground_scan_index; ++i) {
-      size_t lowerInd = j + (i)*_horizontal_scans;
-      size_t upperInd = j + (i + 1) * _horizontal_scans;
+  for (size_t j = 0; j < _num_horizontal_pixel; ++j) {
+    for (size_t i = _num_vertical_pixel / 2 - 1; i < _num_vertical_pixel - 1; ++i) {
+      size_t lowerInd = j + (i)*_num_horizontal_pixel;
+      size_t upperInd = j + (i + 1) * _num_horizontal_pixel;
 
-      if (_full_cloud->points[lowerInd].intensity == -1 ||
-          _full_cloud->points[upperInd].intensity == -1) {
+      if (_rgbd_cloud_in->points[lowerInd].z == 0 ||
+          _rgbd_cloud_in->points[upperInd].z == 0) {
         // no info to check, invalid points
         _ground_mat(i, j) = -1;
         continue;
       }
 
       float dX =
-          _full_cloud->points[upperInd].x - _full_cloud->points[lowerInd].x;
+          _rgbd_cloud_in->points[upperInd].x - _rgbd_cloud_in->points[lowerInd].x;
       float dY =
-          _full_cloud->points[upperInd].y - _full_cloud->points[lowerInd].y;
+          _rgbd_cloud_in->points[upperInd].y - _rgbd_cloud_in->points[lowerInd].y;
       float dZ =
-          _full_cloud->points[upperInd].z - _full_cloud->points[lowerInd].z;
+          _rgbd_cloud_in->points[upperInd].z - _rgbd_cloud_in->points[lowerInd].z;
 
       float vertical_angle = std::atan2(dZ , sqrt(dX * dX + dY * dY + dZ * dZ));
 
       // TODO: review this change
 
-      if ( (vertical_angle - _sensor_mount_angle) <= 10 * DEG_TO_RAD) {
+      if ( (vertical_angle - _sensor_mount_angle) >= 0.5 * DEG_TO_RAD) {
         _ground_mat(i, j) = 1;
         _ground_mat(i + 1, j) = 1;
       }
@@ -278,41 +341,61 @@ void ImageProjection::groundRemoval() {
   // mark entry that doesn't need to label (ground and invalid point) for
   // segmentation note that ground remove is from 0~_N_scan-1, need _range_mat
   // for mark label matrix for the 16th scan
-  for (size_t i = 0; i < _vertical_scans; ++i) {
-    for (size_t j = 0; j < _horizontal_scans; ++j) {
+  for (size_t i = 0; i < _num_vertical_pixel; ++i) {
+    for (size_t j = 0; j < _num_horizontal_pixel; ++j) {
+      // 创建range_mat
+      // generalRangeMat(i, j);
       if (_ground_mat(i, j) == 1 ||
-          _range_mat(i, j) == FLT_MAX) {
-        _label_mat(i, j) = -1;
+          _rgbd_cloud_in->points[j + i * _num_horizontal_pixel].z == FLT_MAX || 
+          _rgbd_cloud_in->points[j + i * _num_horizontal_pixel].z == 0 || 
+          _ground_mat(i, j) == -1) {
+          _label_mat(i, j) = -1;
       }
     }
   }
 
-  for (size_t i = 0; i <= _ground_scan_index; ++i) {
-    for (size_t j = 0; j < _horizontal_scans; ++j) {
-      if (_ground_mat(i, j) == 1)
-        _ground_cloud->push_back(_full_cloud->points[j + i * _horizontal_scans]);
+  for (size_t i = _num_vertical_pixel / 2 - 1; i < _num_vertical_pixel; ++i) {
+    for (size_t j = 0; j < _num_horizontal_pixel; ++j) {
+      if (_ground_mat(i, j) == 1) {
+        _ground_cloud->points.push_back(_rgbd_cloud_in->points[j + i * _num_horizontal_pixel]);
+      }
+      // std::cout << "nihaoma!!!!!!!!!!!!" << std::endl;
+        // _ground_cloud->push_back(_rgbd_cloud_in->points[j + i * _num_horizontal_pixel]);
+        // _ground_cloud->points.push_back(_rgbd_cloud_in->points[j + i * _num_horizontal_pixel]);
     }
   }
+  // std::cout << "zhixing!!!!!!!!!!!!!!!!!!!!------------------->" << _ground_cloud->points.size() << std::endl;
+}
+// 创建_range_mat的矩阵
+void ImageProjection::generalRangeMat(const int &row, const int &col) {
+  PointType thisPoint = _rgbd_cloud_in->points[col + row * _num_horizontal_pixel];
+  float range = sqrt(thisPoint.x * thisPoint.x +
+                       thisPoint.y * thisPoint.y +
+                       thisPoint.z * thisPoint.z);
+  _range_mat(row, col) = range;
 }
 
+// 
 void ImageProjection::cloudSegmentation() {
   // segmentation process
-  for (size_t i = 0; i < _vertical_scans; ++i)
-    for (size_t j = 0; j < _horizontal_scans; ++j)
+  // 如果lab的mat不是地面点和无效点,就放入labelComponents函数进行分割
+  for (size_t i = 0; i < _num_vertical_pixel; ++i)
+    for (size_t j = 0; j < _num_horizontal_pixel; ++j)
       if (_label_mat(i, j) == 0) labelComponents(i, j);
 
+  // 
   int sizeOfSegCloud = 0;
   // extract segmented cloud for lidar odometry
-  for (size_t i = 0; i < _vertical_scans; ++i) {
-    _seg_msg.startRingIndex[i] = sizeOfSegCloud - 1 + 5;
+  for (size_t i = 0; i < _num_vertical_pixel; ++i) {
+    // _seg_msg.startRingIndex[i] = sizeOfSegCloud - 1 + 5;
 
-    for (size_t j = 0; j < _horizontal_scans; ++j) {
+    for (size_t j = 0; j < _num_horizontal_pixel; ++j) {
       if (_label_mat(i, j) > 0 || _ground_mat(i, j) == 1) {
         // outliers that will not be used for optimization (always continue)
         if (_label_mat(i, j) == 999999) {
-          if (i > _ground_scan_index && j % 5 == 0) {
+          if (i < (_num_vertical_pixel / 2 - 1) && j % 5 == 0) {
             _outlier_cloud->push_back(
-                _full_cloud->points[j + i * _horizontal_scans]);
+                _rgbd_cloud_in->points[j + i * _num_horizontal_pixel]);
             continue;
           } else {
             continue;
@@ -320,33 +403,33 @@ void ImageProjection::cloudSegmentation() {
         }
         // majority of ground points are skipped
         if (_ground_mat(i, j) == 1) {
-          if (j % 5 != 0 && j > 5 && j < _horizontal_scans - 5) continue;
+          if (j % 5 != 0 && j > 5 && j < _num_horizontal_pixel - 5) continue;
         }
-        // mark ground points so they will not be considered as edge features
-        // later
-        _seg_msg.segmentedCloudGroundFlag[sizeOfSegCloud] =
-            (_ground_mat(i, j) == 1);
-        // mark the points' column index for marking occlusion later
-        _seg_msg.segmentedCloudColInd[sizeOfSegCloud] = j;
-        // save range info
-        _seg_msg.segmentedCloudRange[sizeOfSegCloud] =
-            _range_mat(i, j);
+        // // mark ground points so they will not be considered as edge features
+        // // later
+        // _seg_msg.segmentedCloudGroundFlag[sizeOfSegCloud] =
+        //     (_ground_mat(i, j) == 1);
+        // // mark the points' column index for marking occlusion later
+        // _seg_msg.segmentedCloudColInd[sizeOfSegCloud] = j;
+        // // save range info
+        // _seg_msg.segmentedCloudRange[sizeOfSegCloud] =
+        //     _range_mat(i, j);
         // save seg cloud
-        _segmented_cloud->push_back(_full_cloud->points[j + i * _horizontal_scans]);
+        _segmented_cloud->push_back(_rgbd_cloud_in->points[j + i * _num_horizontal_pixel]);
         // size of seg cloud
-        ++sizeOfSegCloud;
+        // ++sizeOfSegCloud;
       }
     }
 
-    _seg_msg.endRingIndex[i] = sizeOfSegCloud - 1 - 5;
+    // _seg_msg.endRingIndex[i] = sizeOfSegCloud - 1 - 5;
   }
 
   // extract segmented cloud for visualization
-  for (size_t i = 0; i < _vertical_scans; ++i) {
-    for (size_t j = 0; j < _horizontal_scans; ++j) {
+  for (size_t i = 0; i < _num_vertical_pixel; ++i) {
+    for (size_t j = 0; j < _num_horizontal_pixel; ++j) {
       if (_label_mat(i, j) > 0 && _label_mat(i, j) != 999999) {
         _segmented_cloud_pure->push_back(
-            _full_cloud->points[j + i * _horizontal_scans]);
+            _rgbd_cloud_in->points[j + i * _num_horizontal_pixel]);
         _segmented_cloud_pure->points.back().intensity =
             _label_mat(i, j);
       }
@@ -355,11 +438,11 @@ void ImageProjection::cloudSegmentation() {
 }
 
 void ImageProjection::labelComponents(int row, int col) {
-
+  // 分割阈值是60度*rad
   const float segmentThetaThreshold = tan(_segment_theta);
 
-  std::vector<bool> lineCountFlag(_vertical_scans, false);
-  const size_t cloud_size = _vertical_scans * _horizontal_scans;
+  std::vector<bool> lineCountFlag(_num_vertical_pixel, false);
+  const size_t cloud_size = _num_vertical_pixel * _num_horizontal_pixel;
   using Coord2D = Eigen::Vector2i;
   boost::circular_buffer<Coord2D> queue(cloud_size);
   boost::circular_buffer<Coord2D> all_pushed(cloud_size);
@@ -384,14 +467,14 @@ void ImageProjection::labelComponents(int row, int col) {
       int thisIndX = fromInd.x() + iter.x();
       int thisIndY = fromInd.y() + iter.y();
       // index should be within the boundary
-      if (thisIndX < 0 || thisIndX >= _vertical_scans){
+      if (thisIndX < 0 || thisIndX >= _num_vertical_pixel){
         continue;
       }
       // at range image margin (left or right side)
       if (thisIndY < 0){
-        thisIndY = _horizontal_scans - 1;
+        thisIndY = _num_horizontal_pixel - 1;
       }
-      if (thisIndY >= _horizontal_scans){
+      if (thisIndY >= _num_horizontal_pixel){
         thisIndY = 0;
       }
       // prevent infinite loop (caused by put already examined point back)
@@ -406,7 +489,7 @@ void ImageProjection::labelComponents(int row, int col) {
 
       float alpha = (iter.x() == 0) ? _ang_resolution_X : _ang_resolution_Y;
       float tang = (d2 * sin(alpha) / (d1 - d2 * cos(alpha)));
-
+      // ??????阈值设置多少合适
       if (tang > segmentThetaThreshold) {
         queue.push_back( {thisIndX, thisIndY } );
 
@@ -450,32 +533,43 @@ void ImageProjection::publishClouds() {
     if (pub.getNumSubscribers() != 0) {
       pcl::toROSMsg(*cloud, laserCloudTemp);
       laserCloudTemp.header.stamp = cloudHeader.stamp;
-      laserCloudTemp.header.frame_id = "base_link";
+      // laserCloudTemp.header.frame_id = "base_link";
+      laserCloudTemp.header.frame_id = "camera_init";
       pub.publish(laserCloudTemp);
     }
   };
 
+  // auto PublishCloudRGB = [&](ros::Publisher& pub,
+  //                         const pcl::PointCloud<PointTypeNew>::Ptr& cloud) {
+  //   if (pub.getNumSubscribers() != 0) {
+  //     pcl::toROSMsg(*cloud, laserCloudTemp);
+  //     laserCloudTemp.header.stamp = cloudHeader.stamp;
+  //     laserCloudTemp.header.frame_id = "base_link";
+  //     pub.publish(laserCloudTemp);
+  //   }
+  // };
+
   PublishCloud(_pub_outlier_cloud, _outlier_cloud);
   PublishCloud(_pub_segmented_cloud, _segmented_cloud);
-  PublishCloud(_pub_full_cloud, _full_cloud);
+  // PublishCloud(_pub_full_cloud, _rgbd_cloud_in);
   PublishCloud(_pub_ground_cloud, _ground_cloud);
   PublishCloud(_pub_segmented_cloud_pure, _segmented_cloud_pure);
   PublishCloud(_pub_full_info_cloud, _full_info_cloud);
 
-  if (_pub_segmented_cloud_info.getNumSubscribers() != 0) {
-    _pub_segmented_cloud_info.publish(_seg_msg);
-  }
+  // if (_pub_segmented_cloud_info.getNumSubscribers() != 0) {
+  //   _pub_segmented_cloud_info.publish(_seg_msg);
+  // }
 
-  //--------------------
-  ProjectionOut out;
-  out.outlier_cloud.reset(new pcl::PointCloud<PointType>());
-  out.segmented_cloud.reset(new pcl::PointCloud<PointType>());
+  // //--------------------
+  // ProjectionOut out;
+  // out.outlier_cloud.reset(new pcl::PointCloud<PointType>());
+  // out.segmented_cloud.reset(new pcl::PointCloud<PointType>());
 
-  std::swap( out.seg_msg, _seg_msg);
-  std::swap(out.outlier_cloud, _outlier_cloud);
-  std::swap(out.segmented_cloud, _segmented_cloud);
+  // std::swap( out.seg_msg, _seg_msg);
+  // std::swap(out.outlier_cloud, _outlier_cloud);
+  // std::swap(out.segmented_cloud, _segmented_cloud);
 
-  _output_channel.send( std::move(out) );
+  // _output_channel.send( std::move(out) );
 
 }
 

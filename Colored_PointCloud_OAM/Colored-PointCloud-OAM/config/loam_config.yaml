@@ -33,3 +33,13 @@ lego_loam:
         history_keyframe_fitness_score: 0.3        # the smaller the better alignment
 
         global_map_visualization_search_radius: 500.0 # key frames with in n meters will be visualized
+    
+    camera:
+        focalLength: 525.0
+        centerX: 319.5
+        centerY: 239.5
+        scalingFactor: 5000.0
+        num_vertical_pixel: 480
+        num_horizontal_pixel: 640
+        horizontal_fov: 57.0
+        vertical_fov: 43.0

@@ -14,6 +14,9 @@
     <arg name="rosbag"  default=""/>
     <arg name="imu_topic" default="/imu/data"/>
     <arg name="lidar_topic" default="/velodyne_points"/>
+    <arg name="image_topic" default="/camera/rgb/image_color"/>
+    <arg name="depth_topic" default="/camera/depth/image"/>
+    <arg name="aligned_associate" default=""/>
 
     <rosparam file="$(find lego_loam_bor)/config/loam_config.yaml" command="load"/>
 
@@ -23,8 +26,9 @@
        <param name="rosbag"      value="$(arg rosbag)" type="string" />
        <param name="imu_topic"   value="$(arg imu_topic)" type="string" />
        <param name="lidar_topic" value="$(arg lidar_topic)" type="string" />
-       <param name="image_topic" value="$(arg lidar_topic)" type="string" />
-       <param name="depth_topic" value="$(arg lidar_topic)" type="string" />
+       <param name="image_topic" value="$(arg image_topic)" type="string" />
+       <param name="depth_topic" value="$(arg depth_topic)" type="string" />
+       <param name="aligned_associate"      value="$(arg aligned_associate)" type="string" />
     </node>
 
 </launch>

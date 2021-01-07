@@ -20,6 +20,8 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   nav_msgs
   cloud_msgs
+
+  cv_bridge
 )
 
 find_package(GTSAM REQUIRED QUIET)
